@@ -118,7 +118,7 @@ class Mp4ChunkRecorder:
             logging.error("FrameAny message does not contain a supported codec.")
             return
 
-        timestamp = message.header.timestamp.ToDatetime()
+        timestamp = message.header.timestamp.ToDatetime().replace(tzinfo=timezone.utc)
 
         # If no active recording or if the codec has changed, start a new chunk.
         if self.container is None or self.current_codec != codec:
@@ -208,7 +208,7 @@ def main() -> None:
     uploader_thread.start()
 
     # In the configuration, set the chunk duration in seconds.
-    chunk_duration_sec = m87.get_config_value("CHUNK_DURATION_SEC", 60, int)
+    chunk_duration_sec = m87.get_config_value("CHUNK_DURATION_SEC", 60, lambda x: int(x) if x.isdigit() else 60)
 
     # Instantiate our recorder.
     recorder = Mp4ChunkRecorder(chunk_duration_sec)
