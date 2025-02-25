@@ -1,6 +1,16 @@
 build_kit:
   name: python3
   version: latest
-outbound_topics:
-  - name: HELLO_WORLD_MESSAGE
-    message_type: make87_messages.text.text_plain.PlainText
+inbound_topics:
+  - name: VIDEO_DATA
+    message_type: make87_messages.video.any.FrameAny
+requester_endpoints:
+    - name: FILE_TO_UPLOAD
+      requester_message_type: make87_messages.file.simple_file.RelativePathFile
+      provider_message_type: make87_messages.primitive.bool.Bool
+config:
+  values:
+    - name: CHUNK_DURATION_SEC
+      description: "Duration after which a new chunk is being created. Needs to be full seconds (int). Default: 60"
+      default: 60
+      required: false
