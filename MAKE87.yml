@@ -1,0 +1,6 @@
+build_kit:
+  name: python3
+  version: latest
+outbound_topics:
+  - name: HELLO_WORLD_MESSAGE
+    message_type: make87_messages.text.text_plain.PlainText
