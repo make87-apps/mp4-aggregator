@@ -45,7 +45,14 @@ class Mp4ChunkRecorder:
 
         timestamp = timestamp.replace(tzinfo=timezone.utc)
         self.chunk_start_time = timestamp
-        self.current_filename = timestamp.astimezone().isoformat() + ".mp4"
+        timestamp_local = timestamp.astimezone()
+        self.current_filename = (
+            timestamp_local.strftime("%Y%m%d_%H%M%S")
+            + f"_{timestamp_local.microsecond // 1000:03d}"
+            + "_"
+            + timestamp_local.strftime("%z")
+            + ".mp4"
+        )
         logging.info(f"Opening new chunk: {self.current_filename} (codec: {codec})")
         self.container = av.open(self.current_filename, mode="w", format="mp4")
 
