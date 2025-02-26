@@ -39,12 +39,15 @@ def recorder_worker(chunk_duration_sec: int):
         video_type = message.WhichOneof("data")
         if video_type == "h264":
             codec_name = "h264"
+            codec_tag = "avc1"
             submessage = message.h264
         elif video_type == "h265":
             codec_name = "hevc"
+            codec_tag = "hvc1"
             submessage = message.h265
         elif video_type == "av1":
             codec_name = "av1"
+            codec_tag = "av01"
             submessage = message.av1
         else:
             print("Unknown frame type received, discarding.")
@@ -71,7 +74,10 @@ def recorder_worker(chunk_duration_sec: int):
             filename = get_new_filename(frame_time)
             container = av.open(filename, mode="w")
             stream = container.add_stream(codec_name)
+            stream.width = submessage.width
+            stream.height = submessage.height
             stream.time_base = TIME_BASE
+            stream.codec_context.codec_tag = codec_tag
 
             # Reset PTS base (first frame starts at PTS 0)
             start_pts = current_pts
