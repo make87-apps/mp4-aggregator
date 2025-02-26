@@ -88,6 +88,8 @@ class Mp4ChunkRecorder:
             pps=b"D\x01\xc0r\xf0\x94\x1e\xf6H",
         )
 
+        self.stream.codec_context.flags |= av.codec.context.Flags.global_header
+
     def flush_last_packet(self, final_pts: int | None = None) -> None:
         """Flushes the last packet if one exists."""
         if self.last_packet is not None:
