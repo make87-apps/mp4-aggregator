@@ -33,7 +33,7 @@ class Mp4ChunkRecorder:
         self.current_filename = None
         self.current_codec = None
 
-    def start_new_chunk(self, timestamp: datetime, codec: str) -> None:
+    def start_new_chunk(self, timestamp: datetime, codec: str, width: int, height: int) -> None:
         """Opens a new mp4 chunk for the given codec and timestamp."""
         # If this is not the first chunk, increment the index.
         if not self.first_chunk:
@@ -67,6 +67,9 @@ class Mp4ChunkRecorder:
             raise ValueError(f"Unsupported codec: {codec}")
 
         self.stream = self.container.add_stream(stream_codec)
+        if width > 0 and height > 0:  # we assume any of the values being "0" means its not provided.
+            self.stream.width = width
+            self.stream.height = height
         self.stream.time_base = TIME_BASE
         self.last_packet = None
 
@@ -89,10 +92,6 @@ class Mp4ChunkRecorder:
         if self.container is not None:
             total_ticks = int(self.chunk_duration_sec * 90000)
             self.flush_last_packet(final_pts=total_ticks)
-            try:
-                self.container.write_trailer()
-            except AttributeError:
-                logging.warning("Output container has no write_trailer; trailer may be auto-written.")
             self.container.close()
             logging.info(f"Closed chunk {self.chunk_index}")
             if self.current_filename:
@@ -126,25 +125,29 @@ class Mp4ChunkRecorder:
             return
 
         timestamp = message.header.timestamp.ToDatetime().replace(tzinfo=timezone.utc)
+        width, height = frame_variant.width, frame_variant.height
+
 
         # If no active recording or if the codec has changed, start a new chunk.
         if self.container is None or self.current_codec != codec:
             if self.container is not None:
                 self.close_chunk()
-            self.start_new_chunk(timestamp, codec)
+            self.start_new_chunk(timestamp, codec, width, height)
 
         elapsed_sec = (timestamp - self.chunk_start_time).total_seconds()
         if elapsed_sec >= self.chunk_duration_sec:
             self.flush_last_packet(final_pts=int(self.chunk_duration_sec * 90000))
             self.close_chunk()
-            self.start_new_chunk(timestamp, codec)
+            self.start_new_chunk(timestamp, codec, width, height)
             elapsed_sec = 0
 
         pts = int(elapsed_sec / TIME_BASE)
+
         # Create a packet from the frame bytes.
         packet = av.Packet(bytes(frame_variant.data))
         packet.pts = pts
         packet.dts = pts
+        packet.is_keyframe = frame_variant.is_keyframe
         packet.time_base = TIME_BASE
         packet.stream = self.stream
 
