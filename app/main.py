@@ -20,6 +20,15 @@ FALLBACK_DURATION_TICKS = 3_000
 TIME_BASE = Fraction(1, 90_000)
 
 
+def convert_h265_to_hevc(vps: bytes, sps: bytes, pps: bytes):
+    """Convert H.265 VPS/SPS/PPS from Annex B to MP4 HEVC format."""
+
+    def nalu_length_prefixed(nal):
+        return len(nal).to_bytes(4, byteorder="big") + nal  # 4-byte length prefix
+
+    return nalu_length_prefixed(vps) + nalu_length_prefixed(sps) + nalu_length_prefixed(pps)
+
+
 class Mp4ChunkRecorder:
     def __init__(self, chunk_duration_sec: int):
         self.chunk_duration_sec = chunk_duration_sec
@@ -72,6 +81,12 @@ class Mp4ChunkRecorder:
             self.stream.height = height
         self.stream.time_base = TIME_BASE
         self.last_packet = None
+
+        self.stream.codec_context.extradata = convert_h265_to_hevc(
+            vps=b"@\x01\x0c\x01\xff\xff\x01`\x00\x00\x03\x00\x00\x03\x00\x00\x03\x00\x00\x03\x00\x96\xac\t",
+            sps=b"B\x01\x01\x01`\x00\x00\x03\x00\x00\x03\x00\x00\x03\x00\x00\x03\x00\x96\xa0\x01\xe0 \x02\x1c\x7f\x8a\xad;\xa2K\xb2",
+            pps=b"D\x01\xc0r\xf0\x94\x1e\xf6H",
+        )
 
     def flush_last_packet(self, final_pts: int | None = None) -> None:
         """Flushes the last packet if one exists."""
@@ -126,7 +141,6 @@ class Mp4ChunkRecorder:
 
         timestamp = message.header.timestamp.ToDatetime().replace(tzinfo=timezone.utc)
         width, height = frame_variant.width, frame_variant.height
-
 
         # If no active recording or if the codec has changed, start a new chunk.
         if self.container is None or self.current_codec != codec:
