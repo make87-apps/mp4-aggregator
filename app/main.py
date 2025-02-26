@@ -2,7 +2,8 @@ import logging
 import os
 import queue
 import threading
-from datetime import datetime, timezone
+import time
+from datetime import datetime
 from fractions import Fraction
 
 import av
@@ -15,167 +16,89 @@ from make87_messages.video.any_pb2 import FrameAny
 # Create a thread‑safe queue for files ready to be uploaded.
 upload_queue: queue.Queue[str] = queue.Queue()
 
-# Fallback duration in 90kHz ticks (~33ms)
-FALLBACK_DURATION_TICKS = 3_000
-TIME_BASE = Fraction(1, 90_000)
+# Time base for PTS/DTS
+TIME_BASE: Fraction = Fraction(1, 90000)  # 90 kHz clock
 
 
-def convert_h265_to_hevc(vps: bytes, sps: bytes, pps: bytes):
-    """Convert H.265 VPS/SPS/PPS from Annex B to MP4 HEVC format."""
-
-    def nalu_length_prefixed(nal):
-        return len(nal).to_bytes(4, byteorder="big") + nal  # 4-byte length prefix
-
-    return nalu_length_prefixed(vps) + nalu_length_prefixed(sps) + nalu_length_prefixed(pps)
+def get_new_filename(timestamp: datetime) -> str:
+    return f"{timestamp:%Y%m%d_%H%M%S}_{timestamp.microsecond // 1000:03d}_{timestamp:%z}.mp4"
 
 
-class Mp4ChunkRecorder:
-    def __init__(self, chunk_duration_sec: int):
-        self.chunk_duration_sec = chunk_duration_sec
-        self.chunk_index = 0
-        self.first_chunk = True
+def recorder_worker(chunk_duration_sec: int):
+    """Handles writing incoming frames to MP4 files."""
+    container: av.container.OutputContainer | None = None
+    stream: av.video.VideoStream | None = None
+    filename: str | None = None
+    start_pts: int | None = None  # Store the PTS offset for each chunk
+    chunk_duration_ticks: int = int(chunk_duration_sec / TIME_BASE)
 
-        self.container = None
-        self.stream = None
-        self.chunk_start_time = None
-        self.last_packet = None
-        self.current_filename = None
-        self.current_codec = None
+    def record_frame(message: FrameAny):
+        nonlocal container, stream, filename, start_pts
 
-    def start_new_chunk(self, timestamp: datetime, codec: str, width: int, height: int) -> None:
-        """Opens a new mp4 chunk for the given codec and timestamp."""
-        # If this is not the first chunk, increment the index.
-        if not self.first_chunk:
-            self.chunk_index += 1
+        # Identify codec and access correct field
+        video_type = message.WhichOneof("data")
+        if video_type == "h264":
+            codec_name = "h264"
+            submessage = message.h264
+        elif video_type == "h265":
+            codec_name = "hevc"
+            submessage = message.h265
+        elif video_type == "av1":
+            codec_name = "av1"
+            submessage = message.av1
         else:
-            self.first_chunk = False
-
-        self.current_codec = codec
-
-        timestamp = timestamp.replace(tzinfo=timezone.utc)
-        self.chunk_start_time = timestamp
-        timestamp_local = timestamp.astimezone()
-        self.current_filename = (
-            timestamp_local.strftime("%Y%m%d_%H%M%S")
-            + f"_{timestamp_local.microsecond // 1000:03d}"
-            + "_"
-            + timestamp_local.strftime("%z")
-            + ".mp4"
-        )
-        logging.info(f"Opening new chunk: {self.current_filename} (codec: {codec})")
-        self.container = av.open(self.current_filename, mode="w", format="mp4")
-
-        if codec == "h264":
-            stream_codec = "h264"
-        elif codec == "h265":
-            stream_codec = "hevc"
-        elif codec == "av1":
-            stream_codec = "av1"
-        else:
-            logging.error(f"Unsupported codec: {codec}")
-            raise ValueError(f"Unsupported codec: {codec}")
-
-        self.stream = self.container.add_stream(stream_codec)
-        if width > 0 and height > 0:  # we assume any of the values being "0" means its not provided.
-            self.stream.width = width
-            self.stream.height = height
-        self.stream.time_base = TIME_BASE
-        self.last_packet = None
-
-        self.stream.codec_context.extradata = convert_h265_to_hevc(
-            vps=b"@\x01\x0c\x01\xff\xff\x01`\x00\x00\x03\x00\x00\x03\x00\x00\x03\x00\x00\x03\x00\x96\xac\t",
-            sps=b"B\x01\x01\x01`\x00\x00\x03\x00\x00\x03\x00\x00\x03\x00\x00\x03\x00\x96\xa0\x01\xe0 \x02\x1c\x7f\x8a\xad;\xa2K\xb2",
-            pps=b"D\x01\xc0r\xf0\x94\x1e\xf6H",
-        )
-
-        self.stream.codec_context.flags |= av.codec.context.Flags.global_header
-
-    def flush_last_packet(self, final_pts: int | None = None) -> None:
-        """Flushes the last packet if one exists."""
-        if self.last_packet is not None:
-            if final_pts is not None:
-                dur = final_pts - self.last_packet.pts
-                if dur <= 0:
-                    dur = FALLBACK_DURATION_TICKS
-            else:
-                dur = FALLBACK_DURATION_TICKS
-            self.last_packet.duration = dur
-            self.last_packet.stream = self.stream
-            self.container.mux_one(self.last_packet)
-            self.last_packet = None
-
-    def close_chunk(self) -> None:
-        """Finalizes and closes the current chunk, then queues it for upload."""
-        if self.container is not None:
-            total_ticks = int(self.chunk_duration_sec * 90000)
-            self.flush_last_packet(final_pts=total_ticks)
-            self.container.close()
-            logging.info(f"Closed chunk {self.chunk_index}")
-            if self.current_filename:
-                upload_queue.put(self.current_filename)
-                logging.info(f"Queued file for upload: {self.current_filename}")
-            # Reset chunk state
-            self.container = None
-            self.stream = None
-            self.chunk_start_time = None
-            self.last_packet = None
-            self.current_filename = None
-            self.current_codec = None
-
-    def process_frame(self, message: FrameAny) -> None:
-        """
-        Processes incoming FrameAny messages. If the codec changes or the elapsed time
-        meets/exceeds the chunk duration, the current chunk is closed and a new one is started.
-        """
-        # Determine which codec is used.
-        if message.HasField("h264"):
-            codec = "h264"
-            frame_variant = message.h264
-        elif message.HasField("h265"):
-            codec = "h265"
-            frame_variant = message.h265
-        elif message.HasField("av1"):
-            codec = "av1"
-            frame_variant = message.av1
-        else:
-            logging.error("FrameAny message does not contain a supported codec.")
+            print("Unknown frame type received, discarding.")
             return
 
-        timestamp = message.header.timestamp.ToDatetime().replace(tzinfo=timezone.utc)
-        width, height = frame_variant.width, frame_variant.height
+        # Convert protobuf timestamp to PTS (90kHz time base)
+        frame_time = submessage.header.timestamp.ToDateTime()
+        current_pts = int(frame_time.timestamp() / TIME_BASE)
 
-        # If no active recording or if the codec has changed, start a new chunk.
-        if self.container is None or self.current_codec != codec:
-            if self.container is not None:
-                self.close_chunk()
-            self.start_new_chunk(timestamp, codec, width, height)
+        # Wait for a keyframe to start a new file
+        if container is None and not submessage.is_keyframe:
+            return  # Ignore non-keyframes until a keyframe starts a new chunk
 
-        elapsed_sec = (timestamp - self.chunk_start_time).total_seconds()
-        if elapsed_sec >= self.chunk_duration_sec:
-            self.flush_last_packet(final_pts=int(self.chunk_duration_sec * 90000))
-            self.close_chunk()
-            self.start_new_chunk(timestamp, codec, width, height)
-            elapsed_sec = 0
+        # Start a new file if:
+        # 1. No container exists (first chunk)
+        # 2. The current chunk has exceeded the duration (in PTS)
+        # 3. We have a keyframe and need to start a fresh segment
+        if container is None or (start_pts is not None and (current_pts - start_pts) >= chunk_duration_ticks):
+            if container:
+                container.close()
+                upload_queue.put(filename)  # Add completed file to upload queue
 
-        pts = int(elapsed_sec / TIME_BASE)
+            # Create new filename and container
+            filename = get_new_filename(frame_time)
+            container = av.open(filename, mode="w")
+            stream = container.add_stream(codec_name)
+            stream.time_base = TIME_BASE
 
-        # Create a packet from the frame bytes.
-        packet = av.Packet(bytes(frame_variant.data))
-        packet.pts = pts
-        packet.dts = pts
-        packet.is_keyframe = frame_variant.is_keyframe
-        packet.time_base = TIME_BASE
-        packet.stream = self.stream
+            # Reset PTS base (first frame starts at PTS 0)
+            start_pts = current_pts
 
-        if self.last_packet is not None:
-            duration = pts - self.last_packet.pts
-            if duration <= 0:
-                duration = FALLBACK_DURATION_TICKS
-            self.last_packet.duration = duration
-            self.last_packet.stream = self.stream
-            self.container.mux_one(self.last_packet)
+        # Stop writing only if the next frame is a keyframe
+        if submessage.is_keyframe and (current_pts - start_pts) >= chunk_duration_ticks:
+            container.close()
+            container = None  # Ensure we don't process further packets in a closed file
+            upload_queue.put(filename)
 
-        self.last_packet = packet
+            # Start a new file immediately with the current keyframe
+            filename = get_new_filename(frame_time)
+            container = av.open(filename, mode="w")
+            stream = container.add_stream(codec_name)
+            stream.time_base = TIME_BASE
+
+            # Reset PTS base (this frame should start the new segment)
+            start_pts = current_pts
+
+        # Adjust PTS for this segment so the first frame is always PTS=0
+        packet = av.Packet(submessage.data)
+        packet.pts = current_pts - start_pts
+        packet.dts = current_pts - start_pts
+
+        container.mux(packet)
+
+    return record_frame
 
 
 def uploader_worker() -> None:
@@ -236,12 +159,10 @@ def main() -> None:
     # In the configuration, set the chunk duration in seconds.
     chunk_duration_sec = m87.get_config_value("CHUNK_DURATION_SEC", 60, lambda x: int(x) if x.isdigit() else 60)
 
-    # Instantiate our recorder.
-    recorder = Mp4ChunkRecorder(chunk_duration_sec)
-
     topic = m87.get_subscriber(name="VIDEO_DATA", message_type=FrameAny)
-    # Subscribe a lambda that passes each message to our recorder.
-    topic.subscribe(recorder.process_frame)
+    # Subscribe with recorder callback
+    topic.subscribe(recorder_worker(chunk_duration_sec))
+
     m87.loop()
 
 
