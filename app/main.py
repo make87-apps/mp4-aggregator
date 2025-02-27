@@ -54,7 +54,7 @@ def recorder_worker(chunk_duration_sec: int):
             return
 
         # Convert protobuf timestamp to PTS (90kHz time base)
-        frame_time = submessage.header.timestamp.ToDateTime()
+        frame_time = submessage.header.timestamp.ToDatetime()
         current_pts = int(frame_time.timestamp() / TIME_BASE)
 
         # Wait for a keyframe to start a new file
