@@ -1,5 +1,5 @@
 build_kit:
-  name: python3
+  name: file://build_kit/Dockerfile
   version: latest
 inbound_topics:
   - name: VIDEO_DATA
