@@ -6,7 +6,6 @@ import re
 import subprocess
 from datetime import datetime
 
-import av
 import make87 as m87
 from make87_messages.core.header_pb2 import Header
 from make87_messages.file.simple_file_pb2 import RelativePathFile
