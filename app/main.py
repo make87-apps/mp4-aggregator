@@ -246,7 +246,7 @@ def main():
 
     # Subscribe to the video topic with our ffmpeg-based recorder callback.
     topic = m87.get_subscriber(name="VIDEO_DATA", message_type=FrameAny)
-    topic.subscribe(recorder_worker_ffmpeg(chunk_duration_sec, buffer_frames=5))
+    topic.subscribe(recorder_worker_ffmpeg(chunk_duration_sec, buffer_frames=30))
 
     m87.loop()
 
