@@ -4,7 +4,7 @@ import queue
 import threading
 import re
 import subprocess
-from datetime import datetime
+from datetime import datetime, timezone
 
 import make87 as m87
 from make87_messages.core.header_pb2 import Header
@@ -18,6 +18,7 @@ upload_queue: queue.Queue[str] = queue.Queue()
 
 def get_new_filename(timestamp: datetime) -> str:
     """Generate a filename using a timestamp with millisecond and timezone details."""
+    timestamp = timestamp.replace(tzinfo=timezone.utc)
     return f"{timestamp:%Y%m%d_%H%M%S}_{timestamp.microsecond // 1000:03d}_{timestamp:%z}.mp4"
 
 
