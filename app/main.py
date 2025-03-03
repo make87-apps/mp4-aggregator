@@ -91,7 +91,7 @@ def ffmpeg_monitor_thread(process):
         if not output_line:
             break  # ffmpeg process ended
         line = output_line.decode("utf-8", errors="ignore")
-        logging.error(f"FFmpeg Output: {line}")  # Log errors!
+        # logging.error(f"FFmpeg Output: {line}")  # Log errors!
         # Detect segment completion (adjust the regex if your ffmpeg log format differs)
         if "ended" in line:
             match = re.search(r"segment:'(.+?\.mp4)'", line)
