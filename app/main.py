@@ -91,6 +91,7 @@ def ffmpeg_monitor_thread(process):
         if not output_line:
             break  # ffmpeg process ended
         line = output_line.decode("utf-8", errors="ignore")
+        # logging.error(f"FFmpeg Output: {line}")  # Log errors!
         # Detect segment completion (adjust the regex if your ffmpeg log format differs)
         if "ended" in line:
             match = re.search(r"segment:'(.+?\.mp4)'", line)
@@ -227,15 +228,12 @@ def uploader_worker():
         message = RelativePathFile(header=header, data=file_bytes, path=filename)
         try:
             response = endpoint.request(message, timeout=60.0)
+            if not response.value:
+                logging.error(f"Failed to upload file: {filename}")
+            else:
+                logging.info(f"Uploaded file: {filename}")
         except Exception as e:
-            logging.error(f"Request failed for file {filename}: {e}")
-            upload_queue.task_done()
-            continue
-
-        if not response.value:
-            logging.error(f"Failed to upload file: {filename}")
-        else:
-            logging.info(f"Uploaded file: {filename}")
+            logging.warning(f"Request failed for file {filename}: {e}")
 
         try:
             os.remove(filename)
