@@ -117,9 +117,10 @@ def recorder_worker_ffmpeg(chunk_duration_sec: int, buffer_frames: int = 5):
     current_codec = None
     fixed_frame_rate = None
     frame_buffer = []  # Buffer tuples of (frame_time, packet_data)
+    first_keyframe_received = False
 
     def record_frame(message: FrameAny):
-        nonlocal ffmpeg_process, codec_set, current_codec, fixed_frame_rate, frame_buffer
+        nonlocal ffmpeg_process, codec_set, current_codec, fixed_frame_rate, frame_buffer, first_keyframe_received
 
         # Determine codec from the message.
         video_type = message.WhichOneof("data")
@@ -138,6 +139,15 @@ def recorder_worker_ffmpeg(chunk_duration_sec: int, buffer_frames: int = 5):
 
         # Get the frame timestamp.
         frame_time = submessage.header.timestamp.ToDatetime()
+
+        # If we haven't received a keyframe yet, buffer frames but don't send them
+        if not first_keyframe_received:
+            if submessage.is_keyframe:
+                first_keyframe_received = True  # Now we can start processing frames
+                logging.info("First keyframe received, starting FFmpeg.")
+            else:
+                logging.info("Skipping non-keyframe before first keyframe is received.")
+                return  # Ignore non-keyframes until we get the first keyframe
 
         # If we haven't computed a fixed frame rate, buffer the frame.
         if fixed_frame_rate is None:
