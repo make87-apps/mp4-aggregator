@@ -45,7 +45,7 @@ def run_ffmpeg(chunk_duration_sec: int, codec: str, frame_rate: float = None):
     ffmpeg_cmd = ["ffmpeg"]
     # If a fixed frame rate is estimated, inject it before the input format.
     if frame_rate is not None:
-        ffmpeg_cmd.extend(["-r", f"{frame_rate:.2f}"])
+        ffmpeg_cmd.extend(["-framerate", f"{frame_rate:.2f}"])
     ffmpeg_cmd.extend(
         [
             "-f",
