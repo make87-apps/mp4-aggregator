@@ -91,7 +91,7 @@ def ffmpeg_monitor_thread(process):
         if not output_line:
             break  # ffmpeg process ended
         line = output_line.decode("utf-8", errors="ignore")
-        # logging.error(f"FFmpeg Output: {line}")  # Log errors!
+        logging.error(f"FFmpeg Output: {line}")  # Log errors!
         # Detect segment completion (adjust the regex if your ffmpeg log format differs)
         if "ended" in line:
             match = re.search(r"segment:'(.+?\.mp4)'", line)
@@ -180,10 +180,28 @@ def recorder_worker_ffmpeg(chunk_duration_sec: int, buffer_frames: int = 5):
             # Send all buffered frames.
             for _, packet_data in frame_buffer:
                 try:
+                    # Check if FFmpeg has exited before writing
+                    if ffmpeg_process.poll() is not None:
+                        logging.error("FFmpeg has exited unexpectedly before writing frames.")
+                        break
+
+                    # Write the frame
                     ffmpeg_process.stdin.write(packet_data)
                     ffmpeg_process.stdin.flush()
+
+                except BrokenPipeError:
+                    logging.error("Broken pipe error: FFmpeg closed its stdin unexpectedly.")
+
+                    # Try reading FFmpeg's last output
+                    ffmpeg_process.stdin.close()
+                    ffmpeg_process.wait()  # Ensure process terminates
+                    ffmpeg_output, _ = ffmpeg_process.communicate()
+
+                    logging.error("FFmpeg Full Output:\n" + ffmpeg_output.decode(errors="ignore"))
+                    break
+
                 except Exception as e:
-                    logging.error("Error writing buffered frame to ffmpeg stdin: " + str(e))
+                    logging.error(f"Unexpected error writing to FFmpeg: {e}")
             frame_buffer.clear()
             return
 
