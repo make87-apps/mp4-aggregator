@@ -166,13 +166,13 @@ def recorder_worker_ffmpeg(chunk_duration_sec: int):
     return record_frame
 
 
-def uploader_worker(file_prefix: str):
+def uploader_worker(path_prefix: str):
     """
     Continuously waits for completed segment filenames in the upload queue,
     reads their contents, and sends them using m87.request.
     """
-    if file_prefix:
-        file_prefix = file_prefix + "/"
+    if path_prefix:
+        path_prefix = path_prefix + "/"
 
     endpoint = m87.get_requester(
         name="FILE_TO_UPLOAD",
@@ -196,7 +196,7 @@ def uploader_worker(file_prefix: str):
             upload_queue.task_done()
             continue
 
-        message = RelativePathFile(header=header, data=file_bytes, path=f"{file_prefix}{filename}")
+        message = RelativePathFile(header=header, data=file_bytes, path=f"{path_prefix}{filename}")
         try:
             response = endpoint.request(message, timeout=60.0)
             if not response.value:
@@ -217,8 +217,8 @@ def main():
     m87.initialize()
 
     # Start the uploader worker thread.
-    file_prefix = m87.get_config_value("FILE_PREFIX", "", decode=lambda x: x.lstrip("/").rstrip("/"))
-    uploader_thread = threading.Thread(target=uploader_worker, args=(file_prefix,), daemon=True)
+    path_prefix = m87.get_config_value("PATH_PREFIX", "", decode=lambda x: x.lstrip("/").rstrip("/"))
+    uploader_thread = threading.Thread(target=uploader_worker, args=(path_prefix,), daemon=True)
     uploader_thread.start()
 
     # Retrieve chunk duration from configuration.
