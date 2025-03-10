@@ -14,3 +14,6 @@ config:
       description: "Duration after which a new chunk is being created. Needs to be full seconds (int). Default: 60"
       default: 60
       required: false
+    - name: FILE_PREFIX
+      description: "File prefix for the chunked files. It will be used as a directory, e.g., 'my_prefix/'. Leading and trailing slashes will be stripped. Default: None."
+      required: false
