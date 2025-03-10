@@ -60,6 +60,8 @@ def run_ffmpeg(chunk_duration_sec: int, codec: str):
             str(chunk_duration_sec),
             "-reset_timestamps",
             "1",  # Each segment starts at 0
+            "-loglevel",
+            "verbose", # needs to stay to detect written segments and upload. Do not remove.
             "-progress",
             "pipe:1",  # Write progress info to stdout
             "output%03d.mp4",  # Output filename pattern (temporary name)
