@@ -8,7 +8,7 @@ from datetime import datetime, timezone
 from fractions import Fraction
 
 import av
-import make87 as m87
+import make87
 from make87_messages.core.header_pb2 import Header
 from make87_messages.file.simple_file_pb2 import RelativePathFile
 from make87_messages.primitive.bool_pb2 import Bool
@@ -169,12 +169,12 @@ def recorder_worker_ffmpeg(chunk_duration_sec: int):
 def uploader_worker(path_prefix: str):
     """
     Continuously waits for completed segment filenames in the upload queue,
-    reads their contents, and sends them using m87.request.
+    reads their contents, and sends them using make87.request.
     """
     if path_prefix:
         path_prefix = path_prefix + "/"
 
-    endpoint = m87.get_requester(
+    endpoint = make87.get_requester(
         name="FILE_TO_UPLOAD",
         requester_message_type=RelativePathFile,
         provider_message_type=Bool,
@@ -214,21 +214,21 @@ def uploader_worker(path_prefix: str):
 
 
 def main():
-    m87.initialize()
+    make87.initialize()
 
     # Start the uploader worker thread.
-    path_prefix = m87.get_config_value("PATH_PREFIX", "", decode=lambda x: x.lstrip("/").rstrip("/"))
+    path_prefix = make87.get_config_value("PATH_PREFIX", "", decode=lambda x: x.lstrip("/").rstrip("/"))
     uploader_thread = threading.Thread(target=uploader_worker, args=(path_prefix,), daemon=True)
     uploader_thread.start()
 
     # Retrieve chunk duration from configuration.
-    chunk_duration_sec = m87.get_config_value("CHUNK_DURATION_SEC", "60", lambda x: int(x) if x.isdigit() else 60)
+    chunk_duration_sec = make87.get_config_value("CHUNK_DURATION_SEC", "60", lambda x: int(x) if x.isdigit() else 60)
 
     # Subscribe to the video topic with our ffmpeg-based recorder callback.
-    topic = m87.get_subscriber(name="VIDEO_DATA", message_type=FrameAny)
+    topic = make87.get_subscriber(name="VIDEO_DATA", message_type=FrameAny)
     topic.subscribe(recorder_worker_ffmpeg(chunk_duration_sec))
 
-    m87.loop()
+    make87.loop()
 
 
 if __name__ == "__main__":
